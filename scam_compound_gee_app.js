@@ -120,7 +120,7 @@ var AOI_FEATURES = ee.FeatureCollection([
   })
 ]);
 
-var DEFAULT_AOI = 'Cambodia-Vietnam corridor';
+var DEFAULT_AOI = 'Southeast Asia overview';
 var BASELINE_YEAR = 2021;
 var DISPLAY_YEAR = 2023;
 var ANALYSIS_YEAR = 2024;
@@ -269,9 +269,9 @@ function styleCandidateCentroids(collection, fillColor, size) {
   return candidateCentroids(collection).style({
     color: '#ffffff',
     fillColor: fillColor,
-    pointSize: size || 9,
-    pointShape: 'circle',
-    width: 2
+    pointSize: size || 12,
+    pointShape: 'diamond',
+    width: 3
   });
 }
 
@@ -1324,9 +1324,9 @@ function renderAoi(aoiName) {
   addLayer('suspected', stylePointCollection(pointsLayerSource.filter(ee.Filter.eq('site_status', 'suspected')), COLORS.suspected, 7), {}, 'Suspected sites', true);
   addLayer('control', stylePointCollection(pointsLayerSource.filter(ee.Filter.eq('site_status', 'control')), COLORS.control, 6), {}, 'Control sites', true);
 
-  addLayer('candidateLowPts', styleCandidateCentroids(filterCandidatesByTier(candidatesLayerSource, 'low'), COLORS.low, 8), {}, 'Low-priority candidate markers', false);
-  addLayer('candidateMediumPts', styleCandidateCentroids(filterCandidatesByTier(candidatesLayerSource, 'medium'), COLORS.medium, 9), {}, 'Medium-priority candidate markers', true);
-  addLayer('candidateHighPts', styleCandidateCentroids(filterCandidatesByTier(candidatesLayerSource, 'high'), COLORS.high, 10), {}, 'High-priority candidate markers', true);
+  addLayer('candidateLowPts', styleCandidateCentroids(filterCandidatesByTier(candidatesLayerSource, 'low'), COLORS.low, 10), {}, 'Low-priority candidate markers', true);
+  addLayer('candidateMediumPts', styleCandidateCentroids(filterCandidatesByTier(candidatesLayerSource, 'medium'), COLORS.medium, 12), {}, 'Medium-priority candidate markers', true);
+  addLayer('candidateHighPts', styleCandidateCentroids(filterCandidatesByTier(candidatesLayerSource, 'high'), COLORS.high, 14), {}, 'High-priority candidate markers', true);
 
   addLayer('candidateLow', styleCandidateTier(filterCandidatesByTier(candidatesLayerSource, 'low'), COLORS.low, '#facc1522', 1.5), {}, 'Low-priority candidates', false);
   addLayer('candidateMedium', styleCandidateTier(filterCandidatesByTier(candidatesLayerSource, 'medium'), COLORS.medium, '#f973162c', 2), {}, 'Medium-priority candidates', false);
