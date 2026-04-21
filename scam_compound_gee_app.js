@@ -259,6 +259,22 @@ function styleCandidateTier(collection, strokeColor, fillColor, width) {
   });
 }
 
+function candidateCentroids(collection) {
+  return ee.FeatureCollection(collection.map(function(f) {
+    return ee.Feature(f.geometry().centroid(30), f.toDictionary(f.propertyNames()));
+  }));
+}
+
+function styleCandidateCentroids(collection, fillColor, size) {
+  return candidateCentroids(collection).style({
+    color: '#ffffff',
+    fillColor: fillColor,
+    pointSize: size || 9,
+    pointShape: 'circle',
+    width: 2
+  });
+}
+
 function formatNumber(value, digits) {
   if (value === null || value === undefined || isNaN(Number(value))) {
     return 'No data';
@@ -411,6 +427,7 @@ legendPanel.add(ui.Label('Legend', {
 legendPanel.add(makeLegendPointRow('Confirmed site', COLORS.confirmed));
 legendPanel.add(makeLegendPointRow('Suspected site', COLORS.suspected));
 legendPanel.add(makeLegendPointRow('Control site', COLORS.control));
+legendPanel.add(makeLegendPointRow('Candidate marker', COLORS.high));
 legendPanel.add(makeLegendZoneRow('High candidate zone', COLORS.high, '#d946ef22'));
 legendPanel.add(makeLegendZoneRow('Medium candidate zone', COLORS.medium, '#f9731618'));
 legendPanel.add(makeLegendZoneRow('Low candidate zone', COLORS.low, '#facc1512'));
@@ -617,6 +634,7 @@ var activePointsInAoi = scamPoints.filterBounds(activeAoi);
 var activeCandidatesInAoi = candidates.filterBounds(activeAoi);
 var activeRenderId = 0;
 var indicatorCache = {};
+var kpiCache = {};
 
 // ---------------------------------------------------------------------------
 // Layer management
@@ -657,6 +675,9 @@ function updateLayerControls() {
   addLayerToggle('Confirmed sites', 'confirmed');
   addLayerToggle('Suspected sites', 'suspected');
   addLayerToggle('Control sites', 'control');
+  addLayerToggle('High-priority candidate markers', 'candidateHighPts');
+  addLayerToggle('Medium-priority candidate markers', 'candidateMediumPts');
+  addLayerToggle('Low-priority candidate markers', 'candidateLowPts');
   addLayerToggle('High-priority candidates', 'candidateHigh');
   addLayerToggle('Medium-priority candidates', 'candidateMedium');
   addLayerToggle('Low-priority candidates', 'candidateLow');
@@ -704,52 +725,77 @@ function runAnalytics() {
   updateRanking(activeCandidatesInAoi, renderId);
 }
 
+function histogramCount(hist, key) {
+  if (!hist || hist[key] === undefined || hist[key] === null) {
+    return 0;
+  }
+  return Number(hist[key]);
+}
+
+function histogramTotal(hist) {
+  var total = 0;
+  if (!hist) {
+    return total;
+  }
+  Object.keys(hist).forEach(function(key) {
+    total += Number(hist[key] || 0);
+  });
+  return total;
+}
+
+function applyKpiStats(stats, aoiName) {
+  cardReported.value.setValue(String(stats.total || 0));
+  cardReported.note.setValue(aoiName);
+
+  cardConfirmed.value.setValue(String(stats.confirmed || 0));
+  cardConfirmed.note.setValue('Reference sites');
+
+  cardSuspected.value.setValue(String(stats.suspected || 0));
+  cardSuspected.note.setValue('Validation comparison');
+
+  cardControl.value.setValue(String(stats.control || 0));
+  cardControl.note.setValue('Control locations');
+
+  cardCandidate.value.setValue(String(stats.candidates || 0));
+  cardCandidate.note.setValue(
+    'High ' + (stats.high || 0) +
+    ' | Medium ' + (stats.medium || 0) +
+    ' | Low ' + (stats.low || 0)
+  );
+}
+
 // ---------------------------------------------------------------------------
 // KPI, charts, validation, ranking
 // ---------------------------------------------------------------------------
 
 function updateKpis(pointsInAoi, candidatesInAoi, renderId, aoiName) {
-  var total = pointsInAoi.size();
-  var confirmedCount = pointsInAoi.filter(ee.Filter.eq('site_status', 'confirmed')).size();
-  var suspectedCount = pointsInAoi.filter(ee.Filter.eq('site_status', 'suspected')).size();
-  var controlCount = pointsInAoi.filter(ee.Filter.eq('site_status', 'control')).size();
-  var candidateCount = candidatesInAoi.size();
-  var highCount = filterCandidatesByTier(candidatesInAoi, 'high').size();
-  var mediumCount = filterCandidatesByTier(candidatesInAoi, 'medium').size();
-  var lowCount = filterCandidatesByTier(candidatesInAoi, 'low').size();
+  if (kpiCache[aoiName]) {
+    applyKpiStats(kpiCache[aoiName], aoiName);
+    return;
+  }
 
   ee.Dictionary({
-    total: total,
-    confirmed: confirmedCount,
-    suspected: suspectedCount,
-    control: controlCount,
-    candidates: candidateCount,
-    high: highCount,
-    medium: mediumCount,
-    low: lowCount
-  }).evaluate(function(stats) {
+    point_status_hist: ee.Dictionary(pointsInAoi.aggregate_histogram('site_status')),
+    candidate_tier_hist: ee.Dictionary(candidatesInAoi.aggregate_histogram('priority_tier'))
+  }).evaluate(function(result) {
     if (renderId !== activeRenderId) {
       return;
     }
-    stats = stats || {};
-    cardReported.value.setValue(String(stats.total || 0));
-    cardReported.note.setValue(aoiName);
-
-    cardConfirmed.value.setValue(String(stats.confirmed || 0));
-    cardConfirmed.note.setValue('Reference sites');
-
-    cardSuspected.value.setValue(String(stats.suspected || 0));
-    cardSuspected.note.setValue('Validation comparison');
-
-    cardControl.value.setValue(String(stats.control || 0));
-    cardControl.note.setValue('Control locations');
-
-    cardCandidate.value.setValue(String(stats.candidates || 0));
-    cardCandidate.note.setValue(
-      'High ' + (stats.high || 0) +
-      ' | Medium ' + (stats.medium || 0) +
-      ' | Low ' + (stats.low || 0)
-    );
+    result = result || {};
+    var pointStatusHist = result.point_status_hist || {};
+    var candidateTierHist = result.candidate_tier_hist || {};
+    var stats = {
+      total: histogramTotal(pointStatusHist),
+      confirmed: histogramCount(pointStatusHist, 'confirmed'),
+      suspected: histogramCount(pointStatusHist, 'suspected'),
+      control: histogramCount(pointStatusHist, 'control'),
+      candidates: histogramTotal(candidateTierHist),
+      high: histogramCount(candidateTierHist, 'high'),
+      medium: histogramCount(candidateTierHist, 'medium'),
+      low: histogramCount(candidateTierHist, 'low')
+    };
+    kpiCache[aoiName] = stats;
+    applyKpiStats(stats, aoiName);
   });
 }
 
@@ -1278,9 +1324,13 @@ function renderAoi(aoiName) {
   addLayer('suspected', stylePointCollection(pointsLayerSource.filter(ee.Filter.eq('site_status', 'suspected')), COLORS.suspected, 7), {}, 'Suspected sites', true);
   addLayer('control', stylePointCollection(pointsLayerSource.filter(ee.Filter.eq('site_status', 'control')), COLORS.control, 6), {}, 'Control sites', true);
 
-  addLayer('candidateLow', styleCandidateTier(filterCandidatesByTier(candidatesLayerSource, 'low'), COLORS.low, '#facc1512', 1), {}, 'Low-priority candidates', false);
-  addLayer('candidateMedium', styleCandidateTier(filterCandidatesByTier(candidatesLayerSource, 'medium'), COLORS.medium, '#f9731618', 1.5), {}, 'Medium-priority candidates', false);
-  addLayer('candidateHigh', styleCandidateTier(filterCandidatesByTier(candidatesLayerSource, 'high'), COLORS.high, '#d946ef22', 3), {}, 'High-priority candidates', true);
+  addLayer('candidateLowPts', styleCandidateCentroids(filterCandidatesByTier(candidatesLayerSource, 'low'), COLORS.low, 8), {}, 'Low-priority candidate markers', false);
+  addLayer('candidateMediumPts', styleCandidateCentroids(filterCandidatesByTier(candidatesLayerSource, 'medium'), COLORS.medium, 9), {}, 'Medium-priority candidate markers', true);
+  addLayer('candidateHighPts', styleCandidateCentroids(filterCandidatesByTier(candidatesLayerSource, 'high'), COLORS.high, 10), {}, 'High-priority candidate markers', true);
+
+  addLayer('candidateLow', styleCandidateTier(filterCandidatesByTier(candidatesLayerSource, 'low'), COLORS.low, '#facc1522', 1.5), {}, 'Low-priority candidates', false);
+  addLayer('candidateMedium', styleCandidateTier(filterCandidatesByTier(candidatesLayerSource, 'medium'), COLORS.medium, '#f973162c', 2), {}, 'Medium-priority candidates', false);
+  addLayer('candidateHigh', styleCandidateTier(filterCandidatesByTier(candidatesLayerSource, 'high'), COLORS.high, '#d946ef36', 3.5), {}, 'High-priority candidates', true);
 
   updateLayerControls();
   updateKpis(activePointsInAoi, activeCandidatesInAoi, renderId, aoiName);
