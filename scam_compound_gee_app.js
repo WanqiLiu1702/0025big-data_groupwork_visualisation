@@ -275,6 +275,26 @@ function styleCandidateCentroids(collection, fillColor, size) {
   });
 }
 
+function makeCandidateHotspotImage(collection, aoi, scaleMeters) {
+  var pointImage = ee.Image().byte().paint(candidateCentroids(collection), 1);
+  return pointImage
+    .reduceResolution({
+      reducer: ee.Reducer.sum(),
+      maxPixels: 4096
+    })
+    .reproject({
+      crs: 'EPSG:3857',
+      scale: scaleMeters || 25000
+    })
+    .focalMax({
+      radius: scaleMeters || 25000,
+      units: 'meters'
+    })
+    .clip(aoi)
+    .selfMask()
+    .rename('candidate_hotspots');
+}
+
 function formatNumber(value, digits) {
   if (value === null || value === undefined || isNaN(Number(value))) {
     return 'No data';
@@ -428,6 +448,7 @@ legendPanel.add(makeLegendPointRow('Confirmed site', COLORS.confirmed));
 legendPanel.add(makeLegendPointRow('Suspected site', COLORS.suspected));
 legendPanel.add(makeLegendPointRow('Control site', COLORS.control));
 legendPanel.add(makeLegendPointRow('Candidate marker', COLORS.high));
+legendPanel.add(makeLegendZoneRow('Candidate hotspots', '#7e22ce', '#7e22ce55'));
 legendPanel.add(makeLegendZoneRow('High candidate zone', COLORS.high, '#d946ef22'));
 legendPanel.add(makeLegendZoneRow('Medium candidate zone', COLORS.medium, '#f9731618'));
 legendPanel.add(makeLegendZoneRow('Low candidate zone', COLORS.low, '#facc1512'));
@@ -635,6 +656,7 @@ var activeCandidatesInAoi = candidates.filterBounds(activeAoi);
 var activeRenderId = 0;
 var indicatorCache = {};
 var kpiCache = {};
+var candidateHotspotCache = {};
 
 // ---------------------------------------------------------------------------
 // Layer management
@@ -665,6 +687,7 @@ function updateLayerControls() {
   layerPanel.clear();
   addLayerToggle('Regional AOI boundaries', 'allAois');
   addLayerToggle('Selected AOI boundary', 'aoi');
+  addLayerToggle('Candidate hotspots', 'candidateHotspots');
   addLayerToggle('Sentinel-2 RGB (' + DISPLAY_YEAR + ')', 'rgb');
   addLayerToggle('NDVI (' + DISPLAY_YEAR + ')', 'ndvi');
   addLayerToggle('NDBI (' + DISPLAY_YEAR + ')', 'ndbi');
@@ -1134,7 +1157,9 @@ function updateRanking(candidatesInAoi, renderId) {
 
 function setDefaultInfo() {
   infoPanel.clear();
-  var defaultText = activeIndicators
+  var defaultText = isOverviewAoiName(aoiSelect.getValue())
+    ? 'Overview mode uses aggregated candidate hotspots so the Southeast Asia map stays readable. Switch to a detailed AOI to inspect candidate markers and polygons.'
+    : activeIndicators
     ? 'Click anywhere on the map to sample NDVI, NDBI and night-time lights, find the nearest reported site, and inspect candidate metrics if the clicked point falls inside a candidate polygon.'
     : 'Imagery and pixel-level sampling are loaded on demand. Click "Load Imagery Layers" for the current detailed AOI when you need Sentinel or VIIRS inspection.';
   infoPanel.add(ui.Label(
@@ -1324,13 +1349,24 @@ function renderAoi(aoiName) {
   addLayer('suspected', stylePointCollection(pointsLayerSource.filter(ee.Filter.eq('site_status', 'suspected')), COLORS.suspected, 7), {}, 'Suspected sites', true);
   addLayer('control', stylePointCollection(pointsLayerSource.filter(ee.Filter.eq('site_status', 'control')), COLORS.control, 6), {}, 'Control sites', true);
 
-  addLayer('candidateLowPts', styleCandidateCentroids(filterCandidatesByTier(candidatesLayerSource, 'low'), COLORS.low, 10), {}, 'Low-priority candidate markers', true);
-  addLayer('candidateMediumPts', styleCandidateCentroids(filterCandidatesByTier(candidatesLayerSource, 'medium'), COLORS.medium, 12), {}, 'Medium-priority candidate markers', true);
-  addLayer('candidateHighPts', styleCandidateCentroids(filterCandidatesByTier(candidatesLayerSource, 'high'), COLORS.high, 14), {}, 'High-priority candidate markers', true);
+  if (overviewMode) {
+    if (!candidateHotspotCache[aoiName]) {
+      candidateHotspotCache[aoiName] = makeCandidateHotspotImage(candidatesLayerSource, activeAoi, 25000);
+    }
+    addLayer('candidateHotspots', candidateHotspotCache[aoiName], {
+      min: 1,
+      max: 12,
+      palette: ['#fde68a', '#f59e0b', '#ef4444', '#7e22ce']
+    }, 'Candidate hotspots', true);
+  } else {
+    addLayer('candidateLowPts', styleCandidateCentroids(filterCandidatesByTier(candidatesLayerSource, 'low'), COLORS.low, 10), {}, 'Low-priority candidate markers', false);
+    addLayer('candidateMediumPts', styleCandidateCentroids(filterCandidatesByTier(candidatesLayerSource, 'medium'), COLORS.medium, 12), {}, 'Medium-priority candidate markers', true);
+    addLayer('candidateHighPts', styleCandidateCentroids(filterCandidatesByTier(candidatesLayerSource, 'high'), COLORS.high, 14), {}, 'High-priority candidate markers', true);
 
-  addLayer('candidateLow', styleCandidateTier(filterCandidatesByTier(candidatesLayerSource, 'low'), COLORS.low, '#facc1522', 1.5), {}, 'Low-priority candidates', false);
-  addLayer('candidateMedium', styleCandidateTier(filterCandidatesByTier(candidatesLayerSource, 'medium'), COLORS.medium, '#f973162c', 2), {}, 'Medium-priority candidates', false);
-  addLayer('candidateHigh', styleCandidateTier(filterCandidatesByTier(candidatesLayerSource, 'high'), COLORS.high, '#d946ef36', 3.5), {}, 'High-priority candidates', true);
+    addLayer('candidateLow', styleCandidateTier(filterCandidatesByTier(candidatesLayerSource, 'low'), COLORS.low, '#facc1522', 1.5), {}, 'Low-priority candidates', false);
+    addLayer('candidateMedium', styleCandidateTier(filterCandidatesByTier(candidatesLayerSource, 'medium'), COLORS.medium, '#f973162c', 2), {}, 'Medium-priority candidates', false);
+    addLayer('candidateHigh', styleCandidateTier(filterCandidatesByTier(candidatesLayerSource, 'high'), COLORS.high, '#d946ef36', 3.5), {}, 'High-priority candidates', true);
+  }
 
   updateLayerControls();
   updateKpis(activePointsInAoi, activeCandidatesInAoi, renderId, aoiName);
