@@ -3,7 +3,7 @@
 This repository contains the visualization-side handoff files for the
 CASA0025 scam compound project.
 
-## Current script
+## Included files
 
 - `scam_compound_gee_app_v3.js`
   - Current Google Earth Engine app script.
@@ -16,12 +16,10 @@ CASA0025 scam compound project.
     - evidence scatter
     - priority review list
 
-## Legacy files
-
-- `scam_compound_gee_app.js`
-  - Earlier app version kept for reference.
-- `index_draft.qmd`
-  - Draft write-up / page content from the earlier workflow.
+- `README.md`
+  - Short handoff note for the next person.
+- `.gitignore`
+  - Keeps local-only preview/data folders out of the repo.
 
 ## Data assumptions in V3
 
@@ -36,14 +34,12 @@ The current Stage 2 candidate outputs are effectively the
 Cambodia-Vietnam workflow outputs. The broader reported-site points still
 include Cambodia, Myanmar, Thailand, and Vietnam context points.
 
-## Local supporting files
+## Not included in the repo
 
-- `data/`
-  - small derived files used for web / static exploration
-- `gee_upload_ready/`
-  - earlier upload-ready GIS exports kept for reference
+Local preview files, upload-ready GIS exports, and earlier V1/V2 drafts are
+left out of version control so the handoff stays small and unambiguous.
 
 ## Handoff note
 
-If someone else continues the app, start from `scam_compound_gee_app_v3.js`
-rather than the older V1/V2 logic.
+If someone else continues the app, start directly from
+`scam_compound_gee_app_v3.js`.
