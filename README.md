@@ -1,87 +1,49 @@
-# Visualization workflow
+# Visualization Handoff
 
-This folder contains the visualization-facing Earth Engine app script for the
-CASA0025 scam compound pattern exploration project.
+This repository contains the visualization-side handoff files for the
+CASA0025 scam compound project.
 
-## Files
+## Current script
 
-- `scam_compound_gee_app.js`: Google Earth Engine UI script. Paste into the
-  Earth Engine Code Editor and publish as an Earth Engine App.
+- `scam_compound_gee_app_v3.js`
+  - Current Google Earth Engine app script.
+  - This is the main file to paste into the Earth Engine Code Editor.
+  - V3 keeps the lightweight map design and focuses on:
+    - candidate density map
+    - confirmed / suspected / control site layers
+    - stage funnel
+    - precomputed validation charts
+    - evidence scatter
+    - priority review list
 
-## Current app coverage
+## Legacy files
 
-The script builds on the group analysis code and adds:
+- `scam_compound_gee_app.js`
+  - Earlier app version kept for reference.
+- `index_draft.qmd`
+  - Draft write-up / page content from the earlier workflow.
 
-- AOI selector for Cambodia-Vietnam, Myanmar-Thailand, Golden Triangle, and
-  Southeast Asia overview.
-- Persistent semi-transparent boundaries for the three main AOIs, plus a
-  "Show All Regions" button for the regional overview.
-- Layer toggles for Sentinel-2 RGB, NDVI, NDBI, delta NDVI, delta NDBI,
-  VIIRS night-time lights, delta night-time lights, and reported site classes.
-- Reported site styling for confirmed, suspected, and control points.
-- Final candidate layers split into high, medium, and low priority tiers.
-- Summary counts and a mean NDVI/NDBI chart by site status.
-- Candidate priority counts from the final summary asset.
-- Map-click panel that samples the selected location, reports the nearest
-  known site, and shows candidate metrics when the click falls inside a
-  candidate area.
+## Data assumptions in V3
 
-## Inputs needed from analysis
-
-The app is currently set to run with the shared project asset that was already
-available in the original group script:
+The script is configured to read these Earth Engine assets:
 
 ```javascript
-var SCAM_POINTS_ASSET = 'projects/project-2736c40e-7bac-492d-b63/assets/scam_sites';
-var UPDATED_POINTS_ASSET = '';
-var UPDATED_POINTS_NEEDS_LONLAT_GEOMETRY = false;
-var CANDIDATE_ASSET = '';
+var SCAM_POINTS_ASSET = 'projects/casa0025wk6/assets/scam_points_cleaned';
+var CANDIDATE_ASSET = 'projects/casa0025wk6/assets/Final_Summary_Table_Complete';
 ```
 
-`UPDATED_POINTS_ASSET` and `CANDIDATE_ASSET` are optional because the asset IDs
-found in the analysis scripts were private to another account and may not load
-in your Earth Engine account. To activate controls and candidates, ask the owner
-to share these assets with you or upload the CSV/GeoJSON outputs under your own
-account, then paste your asset IDs into those two variables.
+The current Stage 2 candidate outputs are effectively the
+Cambodia-Vietnam workflow outputs. The broader reported-site points still
+include Cambodia, Myanmar, Thailand, and Vietnam context points.
 
-The updated points asset should contain:
+## Local supporting files
 
-- `id`
-- `country`
-- `city`
-- `name`
-- `lat`
-- `lon`
-- `site_status`
-- `context_type`
+- `data/`
+  - small derived files used for web / static exploration
+- `gee_upload_ready/`
+  - earlier upload-ready GIS exports kept for reference
 
-The final candidate asset should contain:
+## Handoff note
 
-- `candidate_id`
-- `priority_tier`
-- `dNDBI_2021_2024`
-- `dNDVI_2021_2024`
-- `dNTL_2021_2024`
-- `dist_to_border_m`
-- `dist_to_confirmed_m`
-
-## Usable outputs already found in the zip files
-
-- `CASA0025Project-main.zip`: Quarto/GitHub Pages template and an early
-  `index.qmd` draft.
-- `CASA0025_Project_Template-main.zip`: clean Quarto template.
-- `CASA0025_project_workspace-main.zip`: the important analysis materials:
-  - `Analysis/1_embedding_similarity.js`: Google Satellite Embedding similarity
-    screening and candidate point export.
-  - `Analysis/2_candidate_metrics.js`: candidate buffers, NDVI/NDBI/NTL metrics,
-    and distance-to-confirmed metrics.
-  - `Analysis/04`: final candidate tiering and the asset ID
-    `users/houm4ki/0025analysis/Final_Summary_Table_Complete`.
-  - `Analysis/files/Final_Scam_Candidate_Summary_Table.csv`: final exported
-    candidate table with geometry and priority tier.
-
-## Presentation note
-
-Use cautious wording in the interface and presentation. The app visualizes
-spatial similarity and remote-sensing indicators; it does not verify that any
-candidate location is a scam compound.
+If someone else continues the app, start from `scam_compound_gee_app_v3.js`
+rather than the older V1/V2 logic.
