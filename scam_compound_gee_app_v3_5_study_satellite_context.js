@@ -103,6 +103,7 @@ var geom_thailand = LSIB.filter(ee.Filter.eq('country_na', 'Thailand')).geometry
 var geom_laos     = LSIB.filter(ee.Filter.eq('country_na', 'Laos')).geometry();
 var STUDY_GEOM    = geom_cambodia.union(geom_vietnam)
                      .union(geom_myanmar).union(geom_thailand).union(geom_laos);
+var STUDY_BOUNDS  = STUDY_GEOM.bounds(1000);
 
 // Cambodia border corridor — Cambodia and Vietnam geometry, with the
 // Cambodia-Thailand shared border highlighted as an adjacent study signal.
@@ -559,6 +560,7 @@ var candidates = ee.FeatureCollection(CANDIDATE_ASSET).select(
     'dist_to_border_m'
   ]
 );
+var studyCandidates = candidates.filterBounds(STUDY_GEOM);
 
 function filterCandidatesByTier(collection, tierLabel) {
   return collection.filter(ee.Filter.eq('priority_tier', tierLabel));
@@ -576,6 +578,14 @@ var STUDY_COUNTRY_NAMES = ['Cambodia', 'Viet Nam', 'Myanmar', 'Thailand', 'Lao P
 var PROJECT_PROVINCE_COUNTRY_NAMES = ['Cambodia', 'Viet Nam', 'Thailand'];
 
 var LSIB_COUNTRY_NAMES = ['Cambodia', 'Vietnam', 'Burma', 'Thailand', 'Laos'];
+var SHARED_BORDER_BUFFER_M = 2000;
+var camBorderBuffer  = geom_cambodia.buffer(SHARED_BORDER_BUFFER_M);
+var vietBorderBuffer = geom_vietnam.buffer(SHARED_BORDER_BUFFER_M);
+var thaiBorderBuffer = geom_thailand.buffer(SHARED_BORDER_BUFFER_M);
+var myanBorderBuffer = geom_myanmar.buffer(SHARED_BORDER_BUFFER_M);
+var keySharedBorderStrips = camBorderBuffer.intersection(vietBorderBuffer, ee.ErrorMargin(100))
+  .union(camBorderBuffer.intersection(thaiBorderBuffer, ee.ErrorMargin(100)))
+  .union(myanBorderBuffer.intersection(thaiBorderBuffer, ee.ErrorMargin(100)));
 
 function styleCountryBorders(aoi) {
   var countries = COUNTRY_BORDERS
@@ -605,24 +615,7 @@ function styleAdmin1Borders(aoi) {
 }
 
 function styleSharedBorders(aoi) {
-  // Buffer each country by a small amount then intersect pairs
-  // This creates a thin strip exactly along the shared border line
-  var bufferDist = 2000; // 2 km buffer on each side = 4 km total strip width
-
-  var camBuf  = geom_cambodia.buffer(bufferDist);
-  var vietBuf = geom_vietnam.buffer(bufferDist);
-  var thaiBuf = geom_thailand.buffer(bufferDist);
-  var myanBuf = geom_myanmar.buffer(bufferDist);
-
-  // Highlight the shared borders used by the current study areas.
-  var camViet  = camBuf.intersection(vietBuf,  ee.ErrorMargin(100));
-  var camThai  = camBuf.intersection(thaiBuf,  ee.ErrorMargin(100));
-  var myanThai = myanBuf.intersection(thaiBuf, ee.ErrorMargin(100));
-
-  // Combine all border strips
-  var allStrips = camViet.union(camThai)
-                    .union(myanThai)
-                    .intersection(aoi, ee.ErrorMargin(100));
+  var allStrips = keySharedBorderStrips.intersection(aoi, ee.ErrorMargin(100));
 
   return ee.FeatureCollection([ee.Feature(allStrips)])
     .style({
@@ -634,14 +627,13 @@ function styleSharedBorders(aoi) {
 // Sentinel-2 SR median composite clipped to the true AOI boundary.
 // Using real country geometry means satellite colour fills only the study
 // area, matching the reference map style.
-var S2_VIS = {bands: ['B4', 'B3', 'B2'], min: 300, max: 3000, gamma: 1.3, opacity: 0.6};
-
-  // Buffer distance in metres around the key shared borders.
-// Provinces whose geometry intersects this buffer are treated as
-// "core" and rendered at full opacity; the remainder are dimmed.
-var BORDER_BUFFER_M = 150000;  // 150 km — adjust if needed
-
-var BORDER_BUFFER_M = 50000;
+var STUDY_S2_2024_RGB = ee.ImageCollection('COPERNICUS/S2_SR_HARMONIZED')
+  .filterBounds(STUDY_BOUNDS)
+  .filterDate('2024-01-01', '2024-12-31')
+  .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 45))
+  .select(['B4', 'B3', 'B2'])
+  .median()
+  .clip(STUDY_GEOM);
 
 function satelliteFocusGeometry(aoiName, aoi) {
   if (aoiName === 'Myanmar-Thailand Border' ||
@@ -669,13 +661,7 @@ function satellitePeripheralOpacity(aoiName) {
 
 function buildAoiSatelliteStack(aoiName, aoi) {
   var satelliteContext = STUDY_GEOM;
-  var s2 = ee.ImageCollection('COPERNICUS/S2_SR_HARMONIZED')
-    .filterBounds(satelliteContext.bounds(1000))
-    .filterDate('2024-01-01', '2024-12-31')
-    .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 45))
-    .select(['B4', 'B3', 'B2'])
-    .median()
-    .clip(satelliteContext);
+  var s2 = STUDY_S2_2024_RGB;
 
   var coreGeom = satelliteFocusGeometry(aoiName, aoi);
   var coreMask = ee.Image.constant(1).clip(coreGeom);
@@ -1402,13 +1388,8 @@ function getAoiData(aoiName) {
   if (!aoiDataCache[aoiName]) {
     var geometry = AOIS[aoiName];
 
-    // Use broad bounds for candidates so Thailand/Laos data is not excluded
-    var broadGeom = geom_cambodia.union(geom_vietnam)
-                      .union(geom_thailand).union(geom_laos).union(geom_myanmar);
-    var candidateBounds = isOverviewAoiName(aoiName) ? broadGeom : broadGeom;
-
     var points          = scamPoints.filterBounds(geometry.bounds(1000));
-    var candidateSubset = candidates.filterBounds(candidateBounds);
+    var candidateSubset = studyCandidates;
 
     aoiDataCache[aoiName] = {
       geometry:   geometry,
@@ -1435,13 +1416,11 @@ function buildLayerStack(aoiName) {
   if (layerCache[aoiName]) { return layerCache[aoiName]; }
 
   var aoiData      = getAoiData(aoiName);
-  var candidateTierKey = aoiName + ':candidateTiers';
+  var candidateTierKey = 'study:candidateTiers';
 
   if (!candidateTierCache[candidateTierKey]) {
     // Use broad bounds so candidate tier zones cover Thailand too.
-    var broadGeom = geom_cambodia.union(geom_vietnam)
-                      .union(geom_thailand).union(geom_laos).union(geom_myanmar);
-    candidateTierCache[candidateTierKey] = makeCandidateTierImage(aoiData.tiers, broadGeom);
+    candidateTierCache[candidateTierKey] = makeCandidateTierImage(aoiData.tiers, STUDY_GEOM);
   }
   if (!satelliteCache[aoiName]) {
     satelliteCache[aoiName] = buildAoiSatelliteStack(aoiName, aoiData.geometry);
@@ -1550,6 +1529,7 @@ function applyKpiStats(stats, aoiName) {
 function updateKpis(pointsInAoi, candidatesInAoi, renderId, aoiName) {
   if (kpiCache[aoiName]) {
     applyKpiStats(kpiCache[aoiName], aoiName);
+    renderDashboardStats(kpiCache[aoiName], aoiName);
     return;
   }
 
@@ -1567,11 +1547,62 @@ function updateKpis(pointsInAoi, candidatesInAoi, renderId, aoiName) {
       suspected:  histogramCount(pointStatusHist, 'suspected'),
       control:    histogramCount(pointStatusHist, 'control'),
       candidates: histogramTotal(candidateTierHist),
-      high:       histogramCount(candidateTierHist, 'high')
+      high:       histogramCount(candidateTierHist, 'high'),
+      medium:     histogramCount(candidateTierHist, 'medium'),
+      low:        histogramCount(candidateTierHist, 'low')
     };
     kpiCache[aoiName] = stats;
     applyKpiStats(stats, aoiName);
+    renderDashboardStats(stats, aoiName);
   });
+}
+function renderDashboardStats(stats, aoiName) {
+  if (aoiName !== activeAoiName) { return; }
+
+  dashboardPanel.clear();
+  dashboardPanel.add(ui.Label(
+    translate('Candidate Zones by Tier'),
+    {fontWeight: 'bold', fontSize: '12px', margin: '0 0 8px 0'}
+  ));
+
+  var high = stats.high || 0;
+  var medium = stats.medium || 0;
+  var low = stats.low || 0;
+  var maxCount = Math.max(high, medium, low, 1);
+
+  function makeTierBar(label, count, color) {
+    var barW = Math.max(4, Math.round((count / maxCount) * 200));
+    return ui.Panel([
+      ui.Label(label, {
+        fontSize: '11px', width: '52px',
+        color: COLORS.text, margin: '1px 6px 0 0'
+      }),
+      ui.Label('', {
+        width:           barW + 'px',
+        height:          '14px',
+        backgroundColor: color,
+        margin:          '2px 6px 0 0'
+      }),
+      ui.Label(String(count), {
+        fontSize: '11px', color: COLORS.text, margin: '1px 0 0 0'
+      })
+    ], ui.Panel.Layout.flow('horizontal'), {margin: '3px 0'});
+  }
+
+  dashboardPanel.add(makeTierBar('High',   high,   COLORS.high));
+  dashboardPanel.add(makeTierBar('Medium', medium, COLORS.medium));
+  dashboardPanel.add(makeTierBar('Low',    low,    COLORS.low));
+
+  var total = high + medium + low;
+  var highPct = Math.round(100 * high / Math.max(total, 1));
+  dashboardPanel.add(ui.Panel({
+    style: {height: '1px', backgroundColor: COLORS.border, margin: '8px 0'}
+  }));
+  dashboardPanel.add(ui.Label(
+    highPct + '% of candidates are High tier — the most likely scam compound locations.',
+    {fontSize: '11px', color: highPct > 30 ? COLORS.confirmed : COLORS.text,
+     fontWeight: 'bold', margin: '0', whiteSpace: 'pre-wrap'}
+  ));
 }
 function buildDashboard(aoiName) {
   dashboardPanel.clear();
@@ -1580,58 +1611,9 @@ function buildDashboard(aoiName) {
     {fontSize: '12px', color: COLORS.muted}
   ));
 
-  var aoiData = getAoiData(aoiName);
-
-  ee.Dictionary({
-    high:   aoiData.tiers.high.size(),
-    medium: aoiData.tiers.medium.size(),
-    low:    aoiData.tiers.low.size()
-  }).evaluate(function(result) {
-    if (!result) { return; }
-
-    dashboardPanel.clear();
-    dashboardPanel.add(ui.Label(
-      translate('Candidate Zones by Tier'),
-      {fontWeight: 'bold', fontSize: '12px', margin: '0 0 8px 0'}
-    ));
-
-    var maxCount = Math.max(result.high, result.medium, result.low, 1);
-
-    function makeTierBar(label, count, color) {
-      var barW = Math.max(4, Math.round((count / maxCount) * 200));
-      return ui.Panel([
-        ui.Label(label, {
-          fontSize: '11px', width: '52px',
-          color: COLORS.text, margin: '1px 6px 0 0'
-        }),
-        ui.Label('', {
-          width:           barW + 'px',
-          height:          '14px',
-          backgroundColor: color,
-          margin:          '2px 6px 0 0'
-        }),
-        ui.Label(String(count), {
-          fontSize: '11px', color: COLORS.text, margin: '1px 0 0 0'
-        })
-      ], ui.Panel.Layout.flow('horizontal'), {margin: '3px 0'});
-    }
-
-    dashboardPanel.add(makeTierBar('High',   result.high,   COLORS.high));
-    dashboardPanel.add(makeTierBar('Medium', result.medium, COLORS.medium));
-    dashboardPanel.add(makeTierBar('Low',    result.low,    COLORS.low));
-
-    // Summary note
-    var total = result.high + result.medium + result.low;
-    var highPct = Math.round(100 * result.high / Math.max(total, 1));
-    dashboardPanel.add(ui.Panel({
-      style: {height: '1px', backgroundColor: COLORS.border, margin: '8px 0'}
-    }));
-    dashboardPanel.add(ui.Label(
-      highPct + '% of candidates are High tier — the most likely scam compound locations.',
-      {fontSize: '11px', color: highPct > 30 ? COLORS.confirmed : COLORS.text,
-       fontWeight: 'bold', margin: '0', whiteSpace: 'pre-wrap'}
-    ));
-  });
+  if (kpiCache[aoiName]) {
+    renderDashboardStats(kpiCache[aoiName], aoiName);
+  }
 }
 function buildMethodologyPanel() {
   methodologyPanel.clear();
@@ -2146,19 +2128,10 @@ function makeSplitOverlayButton(position) {
   return button;
 }
 
-function getSplitCompareRegion(sourceMap, aoiGeometry) {
-  var bounds = sourceMap.getBounds();
-  var viewport = ee.Geometry.Rectangle(bounds);
-  var compareGeometry = viewport
-    .buffer(75000)
-    .bounds(1000)
-    .intersection(aoiGeometry, ee.ErrorMargin(100));
-
+function getSplitCompareRegion(aoiName, aoiGeometry) {
   return {
-    key: activeAoiName + ':' + bounds.map(function(value) {
-      return Math.round(value * 100) / 100;
-    }).join(','),
-    geometry: compareGeometry
+    key: aoiName + ':full-aoi',
+    geometry: aoiGeometry
   };
 }
 
@@ -2191,15 +2164,13 @@ function buildSplitCompareImages(cacheKey, compareGeometry) {
     .filterBounds(compareGeometry)
     .filterDate('2021-01-01', '2021-12-31')
     .select('avg_rad')
-    .median()
-    .clip(compareGeometry);
+    .median();
 
   var ntl2024 = ee.ImageCollection('NOAA/VIIRS/DNB/MONTHLY_V1/VCMSLCFG')
     .filterBounds(compareGeometry)
     .filterDate('2024-01-01', '2024-12-31')
     .select('avg_rad')
-    .median()
-    .clip(compareGeometry);
+    .median();
 
   var dNTL = ntl2024.subtract(ntl2021).rename('dNTL')
     .clip(compareGeometry);
@@ -2216,7 +2187,7 @@ function showSplitView() {
   var aoiData = getAoiData(activeAoiName);
   var mainView = readMapView(map);
   splitOverlayShown = true;
-  var compareRegion = getSplitCompareRegion(map, aoiData.geometry);
+  var compareRegion = getSplitCompareRegion(activeAoiName, aoiData.geometry);
   var compareImages = buildSplitCompareImages(compareRegion.key, compareRegion.geometry);
 
 /*
