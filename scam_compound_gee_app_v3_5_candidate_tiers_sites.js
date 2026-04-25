@@ -642,7 +642,31 @@ var BORDER_BUFFER_M = 150000;  // 150 km — adjust if needed
 
 var BORDER_BUFFER_M = 50000;
 
-function buildAoiSatelliteStack(aoi) {
+function satelliteFocusGeometry(aoiName, aoi) {
+  if (aoiName === 'Myanmar-Thailand Border' ||
+      aoiName === 'Golden Triangle (future extension)') {
+    return geom_thailand.intersection(aoi, ee.ErrorMargin(100));
+  }
+  return geom_cambodia.intersection(aoi, ee.ErrorMargin(100));
+}
+
+function satelliteFocusLabel(aoiName) {
+  if (aoiName === 'Myanmar-Thailand Border' ||
+      aoiName === 'Golden Triangle (future extension)') {
+    return 'AOI satellite — focus (Thailand)';
+  }
+  return 'AOI satellite — core (Cambodia)';
+}
+
+function satelliteCoreOpacity(aoiName) {
+  return aoiName === 'Myanmar-Thailand Border' ? 0.82 : 0.75;
+}
+
+function satellitePeripheralOpacity(aoiName) {
+  return aoiName === 'Myanmar-Thailand Border' ? 0.22 : 0.35;
+}
+
+function buildAoiSatelliteStack(aoiName, aoi) {
   var s2 = ee.ImageCollection('COPERNICUS/S2_SR_HARMONIZED')
     .filterBounds(aoi.bounds(1000))
     .filterDate('2024-01-01', '2024-12-31')
@@ -651,12 +675,10 @@ function buildAoiSatelliteStack(aoi) {
     .median()
     .clip(aoi);
 
-  // Core = Cambodia (high opacity)
-  var coreGeom = geom_cambodia.intersection(aoi, ee.ErrorMargin(100));
+  var coreGeom = satelliteFocusGeometry(aoiName, aoi);
   var coreMask = ee.Image.constant(1).clip(coreGeom);
 
-  // Peripheral = non-Cambodia part of the selected AOI.
-  var peripheralGeom = aoi.difference(geom_cambodia, ee.ErrorMargin(100));
+  var peripheralGeom = aoi.difference(coreGeom, ee.ErrorMargin(100));
   var peripheralMask = ee.Image.constant(1).clip(peripheralGeom);
 
   return {
@@ -1184,7 +1206,7 @@ var overviewButton = ui.Button({
 });
 
 var basemapButton = ui.Button({
-  label:   'AOI satellite: OFF',
+  label:   'AOI satellite: ON',
   style:   {stretch: 'horizontal'},
   onClick: function() {
     aoiSatelliteShown = !aoiSatelliteShown;
@@ -1372,7 +1394,7 @@ var satelliteCache  = {};
 var kpiCache        = {};
 var layerCache      = {};
 
-var aoiSatelliteShown = false;
+var aoiSatelliteShown = true;
 
 function getAoiData(aoiName) {
   if (!aoiDataCache[aoiName]) {
@@ -1420,18 +1442,18 @@ function buildLayerStack(aoiName) {
     candidateTierCache[candidateTierKey] = makeCandidateTierImage(aoiData.tiers, broadGeom);
   }
   if (!satelliteCache[aoiName]) {
-    satelliteCache[aoiName] = buildAoiSatelliteStack(aoiData.geometry);
+    satelliteCache[aoiName] = buildAoiSatelliteStack(aoiName, aoiData.geometry);
   }
 
   var stack = {
     aoiSatellitePeripheral: ui.Map.Layer(
       satelliteCache[aoiName].peripheral,
-      {bands: ['B4', 'B3', 'B2'], min: 300, max: 3000, gamma: 1.3, opacity: 0.35},
+      {bands: ['B4', 'B3', 'B2'], min: 300, max: 3000, gamma: 1.3, opacity: satellitePeripheralOpacity(aoiName)},
       'AOI satellite — peripheral', aoiSatelliteShown),
     aoiSatelliteCore: ui.Map.Layer(
       satelliteCache[aoiName].core,
-      {bands: ['B4', 'B3', 'B2'], min: 300, max: 3000, gamma: 1.3, opacity: 0.75},
-      'AOI satellite — core (Cambodia)', aoiSatelliteShown),
+      {bands: ['B4', 'B3', 'B2'], min: 300, max: 3000, gamma: 1.3, opacity: satelliteCoreOpacity(aoiName)},
+      satelliteFocusLabel(aoiName), aoiSatelliteShown),
     candidateTiers: ui.Map.Layer(candidateTierCache[candidateTierKey], {
       min:     1,
       max:     3,
@@ -1479,7 +1501,7 @@ function updateLayerControls(stack) {
     {label: translate('Confirmed sites'),                  key: 'confirmed'},
     {label: translate('Suspected sites'),                  key: 'suspected'},
     {label: translate('Control sites'),                    key: 'control'},
-    {label: translate('AOI satellite — core (Cambodia)'),  key: 'aoiSatelliteCore'},
+    {label: satelliteFocusLabel(activeAoiName),            key: 'aoiSatelliteCore'},
     {label: translate('AOI satellite — peripheral'),       key: 'aoiSatellitePeripheral'},
     {label: translate('Candidate Zones by Tier'),          key: 'candidateTiers'},
     {label: translate('Study area boundary'),              key: 'aoi'},
@@ -2075,6 +2097,7 @@ var splitDndbiLayer = null;
 var splitDntlLayer = null;
 var splitOverlayShown = true;
 var splitOverlayButtons = [];
+var splitCompareCache = {};
 
 function readMapView(sourceMap) {
   return {
@@ -2121,10 +2144,80 @@ function makeSplitOverlayButton(position) {
   return button;
 }
 
+function getSplitCompareRegion(sourceMap, aoiGeometry) {
+  var bounds = sourceMap.getBounds();
+  var viewport = ee.Geometry.Rectangle(bounds);
+  var compareGeometry = viewport
+    .buffer(75000)
+    .bounds(1000)
+    .intersection(aoiGeometry, ee.ErrorMargin(100));
+
+  return {
+    key: activeAoiName + ':' + bounds.map(function(value) {
+      return Math.round(value * 100) / 100;
+    }).join(','),
+    geometry: compareGeometry
+  };
+}
+
+function buildSplitCompareImages(cacheKey, compareGeometry) {
+  if (splitCompareCache[cacheKey]) {
+    return splitCompareCache[cacheKey];
+  }
+
+  var s2_2021 = ee.ImageCollection('COPERNICUS/S2_SR_HARMONIZED')
+    .filterBounds(compareGeometry)
+    .filterDate('2021-01-01', '2021-12-31')
+    .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 30))
+    .select(['B11', 'B8'])
+    .median();
+
+  var s2_2024 = ee.ImageCollection('COPERNICUS/S2_SR_HARMONIZED')
+    .filterBounds(compareGeometry)
+    .filterDate('2024-01-01', '2024-12-31')
+    .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 30))
+    .select(['B11', 'B8'])
+    .median();
+
+  var ndbi2021 = s2_2021.normalizedDifference(['B11', 'B8']).rename('NDBI');
+  var ndbi2024 = s2_2024.normalizedDifference(['B11', 'B8']).rename('NDBI');
+  var dNDBI = ndbi2024.subtract(ndbi2021).rename('dNDBI')
+    .clip(compareGeometry);
+  var dNDBIGrowth = dNDBI.updateMask(dNDBI.gt(0.015));
+
+  var ntl2021 = ee.ImageCollection('NOAA/VIIRS/DNB/MONTHLY_V1/VCMSLCFG')
+    .filterBounds(compareGeometry)
+    .filterDate('2021-01-01', '2021-12-31')
+    .select('avg_rad')
+    .median()
+    .clip(compareGeometry);
+
+  var ntl2024 = ee.ImageCollection('NOAA/VIIRS/DNB/MONTHLY_V1/VCMSLCFG')
+    .filterBounds(compareGeometry)
+    .filterDate('2024-01-01', '2024-12-31')
+    .select('avg_rad')
+    .median()
+    .clip(compareGeometry);
+
+  var dNTL = ntl2024.subtract(ntl2021).rename('dNTL')
+    .clip(compareGeometry);
+  var dNTLGrowth = dNTL.updateMask(dNTL.gt(0.25));
+
+  splitCompareCache[cacheKey] = {
+    dNDBIGrowth: dNDBIGrowth,
+    dNTLGrowth:  dNTLGrowth
+  };
+  return splitCompareCache[cacheKey];
+}
+
 function showSplitView() {
   var aoiData = getAoiData(activeAoiName);
   var mainView = readMapView(map);
+  splitOverlayShown = true;
+  var compareRegion = getSplitCompareRegion(map, aoiData.geometry);
+  var compareImages = buildSplitCompareImages(compareRegion.key, compareRegion.geometry);
 
+/*
   // Build dNDBI change image (2021→2024 built-up growth)
   var s2_2021 = ee.ImageCollection('COPERNICUS/S2_SR_HARMONIZED')
     .filterBounds(aoiData.geometry)
@@ -2145,6 +2238,7 @@ function showSplitView() {
   var ndbi2024 = s2_2024.normalizedDifference(['B11', 'B8']).rename('NDBI');
   var dNDBI = ndbi2024.subtract(ndbi2021).rename('dNDBI')
     .clip(aoiData.geometry);
+  var dNDBIGrowth = dNDBI.updateMask(dNDBI.gt(0.015));
 
   // Build dNTL change image (2021→2024 night-time light growth)
   var ntl2021 = ee.ImageCollection('NOAA/VIIRS/DNB/MONTHLY_V1/VCMSLCFG')
@@ -2163,6 +2257,8 @@ function showSplitView() {
 
   var dNTL = ntl2024.subtract(ntl2021).rename('dNTL')
     .clip(aoiData.geometry);
+  var dNTLGrowth = dNTL.updateMask(dNTL.gt(0.25));
+*/
 
   splitMapLeft  = ui.Map();
   splitMapRight = ui.Map();
@@ -2173,38 +2269,38 @@ function showSplitView() {
   splitMapRight.setControlVisibility({layerList: true, mapTypeControl: false, scaleControl: true});
 
   if (!satelliteCache[activeAoiName]) {
-    satelliteCache[activeAoiName] = buildAoiSatelliteStack(aoiData.geometry);
+    satelliteCache[activeAoiName] = buildAoiSatelliteStack(activeAoiName, aoiData.geometry);
   }
   splitMapLeft.addLayer(
     satelliteCache[activeAoiName].peripheral,
-    {bands: ['B4', 'B3', 'B2'], min: 300, max: 3000, gamma: 1.3, opacity: 0.35},
-    'AOI satellite — peripheral', aoiSatelliteShown);
+    {bands: ['B4', 'B3', 'B2'], min: 300, max: 3000, gamma: 1.3, opacity: satellitePeripheralOpacity(activeAoiName)},
+    'AOI satellite — peripheral', false);
   splitMapLeft.addLayer(
     satelliteCache[activeAoiName].core,
-    {bands: ['B4', 'B3', 'B2'], min: 300, max: 3000, gamma: 1.3, opacity: 0.75},
-    'AOI satellite — core (Cambodia)', aoiSatelliteShown);
+    {bands: ['B4', 'B3', 'B2'], min: 300, max: 3000, gamma: 1.3, opacity: satelliteCoreOpacity(activeAoiName)},
+    satelliteFocusLabel(activeAoiName), false);
   splitMapRight.addLayer(
     satelliteCache[activeAoiName].peripheral,
-    {bands: ['B4', 'B3', 'B2'], min: 300, max: 3000, gamma: 1.3, opacity: 0.35},
-    'AOI satellite — peripheral', aoiSatelliteShown);
+    {bands: ['B4', 'B3', 'B2'], min: 300, max: 3000, gamma: 1.3, opacity: satellitePeripheralOpacity(activeAoiName)},
+    'AOI satellite — peripheral', false);
   splitMapRight.addLayer(
     satelliteCache[activeAoiName].core,
-    {bands: ['B4', 'B3', 'B2'], min: 300, max: 3000, gamma: 1.3, opacity: 0.75},
-    'AOI satellite — core (Cambodia)', aoiSatelliteShown);
+    {bands: ['B4', 'B3', 'B2'], min: 300, max: 3000, gamma: 1.3, opacity: satelliteCoreOpacity(activeAoiName)},
+    satelliteFocusLabel(activeAoiName), false);
 
   // dNDBI: green=no change, red=high built-up growth
-  splitDndbiLayer = ui.Map.Layer(dNDBI, {
-    min: -0.1, max: 0.3,
-    palette: ['#1a9850', '#fee08b', '#d73027'],
-    opacity: 0.85
+  splitDndbiLayer = ui.Map.Layer(compareImages.dNDBIGrowth, {
+    min: 0.015, max: 0.18,
+    palette: ['#fee08b', '#f46d43', '#d73027'],
+    opacity: 0.95
   }, 'dNDBI 2021-2024', splitOverlayShown);
   splitMapLeft.layers().add(splitDndbiLayer);
 
   // dNTL: dark=no change, yellow=high light growth
-  splitDntlLayer = ui.Map.Layer(dNTL, {
-    min: -2, max: 10,
-    palette: ['#0d0d0d', '#253494', '#2c7fb8', '#41b6c4', '#ffffcc'],
-    opacity: 0.85
+  splitDntlLayer = ui.Map.Layer(compareImages.dNTLGrowth, {
+    min: 0.25, max: 6,
+    palette: ['#2c7fb8', '#41b6c4', '#ff1493'],
+    opacity: 0.95
   }, 'dNTL 2021-2024', splitOverlayShown);
   splitMapRight.layers().add(splitDntlLayer);
 
@@ -2236,11 +2332,11 @@ function showSplitView() {
     widgets: [
       ui.Label('dNDBI', {fontWeight: 'bold', fontSize: '11px', margin: '0 0 4px 0'}),
       ui.Panel([
-        ui.Label('', {width: '12px', height: '10px', backgroundColor: '#1a9850', margin: '0 2px 0 0'}),
-        ui.Label('No change', {fontSize: '10px', margin: '0'})
+        ui.Label('', {width: '12px', height: '10px', backgroundColor: '#fee08b', margin: '0 2px 0 0'}),
+        ui.Label('Low growth', {fontSize: '10px', margin: '0'})
       ], ui.Panel.Layout.flow('horizontal'), {margin: '0 0 2px 0'}),
       ui.Panel([
-        ui.Label('', {width: '12px', height: '10px', backgroundColor: '#fee08b', margin: '0 2px 0 0'}),
+        ui.Label('', {width: '12px', height: '10px', backgroundColor: '#f46d43', margin: '0 2px 0 0'}),
         ui.Label('Moderate growth', {fontSize: '10px', margin: '0'})
       ], ui.Panel.Layout.flow('horizontal'), {margin: '0 0 2px 0'}),
       ui.Panel([
@@ -2260,15 +2356,15 @@ function showSplitView() {
     widgets: [
       ui.Label('dNTL', {fontWeight: 'bold', fontSize: '11px', margin: '0 0 4px 0'}),
       ui.Panel([
-        ui.Label('', {width: '12px', height: '10px', backgroundColor: '#0d0d0d', margin: '0 2px 0 0'}),
-        ui.Label('No change', {fontSize: '10px', margin: '0'})
+        ui.Label('', {width: '12px', height: '10px', backgroundColor: '#2c7fb8', margin: '0 2px 0 0'}),
+        ui.Label('Low growth', {fontSize: '10px', margin: '0'})
       ], ui.Panel.Layout.flow('horizontal'), {margin: '0 0 2px 0'}),
       ui.Panel([
-        ui.Label('', {width: '12px', height: '10px', backgroundColor: '#2c7fb8', margin: '0 2px 0 0'}),
+        ui.Label('', {width: '12px', height: '10px', backgroundColor: '#41b6c4', margin: '0 2px 0 0'}),
         ui.Label('Moderate growth', {fontSize: '10px', margin: '0'})
       ], ui.Panel.Layout.flow('horizontal'), {margin: '0 0 2px 0'}),
       ui.Panel([
-        ui.Label('', {width: '12px', height: '10px', backgroundColor: '#ffffcc', margin: '0 2px 0 0'}),
+        ui.Label('', {width: '12px', height: '10px', backgroundColor: '#ff1493', margin: '0 2px 0 0'}),
         ui.Label('High growth', {fontSize: '10px', margin: '0'})
       ], ui.Panel.Layout.flow('horizontal'), {margin: '0'})
     ],
