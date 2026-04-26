@@ -156,7 +156,7 @@ var currentLanguage = 'English';
 
 var TRANSLATIONS = {
   'English': {
-    'Scam Compound Explorer V3': 'Scam Compound Explorer V3',
+    'Scam Compound Explorer': 'Scam Compound Explorer',
     'AOI Controls': 'AOI Controls',
     'Regional focus': 'Regional focus',
     'Reset View': 'Reset View',
@@ -200,7 +200,7 @@ var TRANSLATIONS = {
     'subtitle': 'Candidate tiers are shown as red, yellow, and green zones over satellite imagery clipped to country boundaries.'
   },
   'Khmer': {
-    'Scam Compound Explorer V3': 'ឧបករណ៍ស្វែងរកទីតាំងបោកប្រាស់',
+    'Scam Compound Explorer': 'ឧបករណ៍ស្វែងរកទីតាំងបោកប្រាស់',
     'AOI Controls': 'ការគ្រប់គ្រងតំបន់',
     'Regional focus': 'តំបន់ស្រាវជ្រាវ',
     'Reset View': 'កំណត់ទិដ្ឋភាពឡើងវិញ',
@@ -295,7 +295,7 @@ var TRANSLATIONS = {
 'Year Compare: ON': 'ប្រៀបធៀបឆ្នាំ: បើក',
   },
   'Thai': {
-    'Scam Compound Explorer V3': 'เครื่องมือสำรวจแหล่งหลอกลวง',
+    'Scam Compound Explorer': 'เครื่องมือสำรวจแหล่งหลอกลวง',
     'AOI Controls': 'ควบคุมพื้นที่',
     'Regional focus': 'พื้นที่ศึกษา',
     'Reset View': 'รีเซ็ตมุมมอง',
@@ -389,7 +389,7 @@ var TRANSLATIONS = {
 'Year Compare: ON': 'เปรียบเทียบปี: เปิด',
   },
   'Vietnamese': {
-    'Scam Compound Explorer V3': 'Công cụ Khám phá Cơ sở Lừa đảo',
+    'Scam Compound Explorer': 'Công cụ Khám phá Cơ sở Lừa đảo',
     'AOI Controls': 'Điều khiển khu vực',
     'Regional focus': 'Khu vực nghiên cứu',
     'Reset View': 'Đặt lại góc nhìn',
@@ -1092,7 +1092,7 @@ var cardSuspected = makeCard('Suspected',               COLORS.suspected,'48%');
 var cardControl   = makeCard('Control',                 COLORS.control,  '48%');
 var cardCandidate = makeCard('Candidate Zones',         COLORS.high,     '100%');
 
-var titleLabel = ui.Label(translate('Scam Compound Explorer V3'), {
+var titleLabel = ui.Label(translate('Scam Compound Explorer'), {
   fontSize:   '22px',
   fontWeight: 'bold',
   color:      COLORS.text,
@@ -1226,7 +1226,7 @@ var languageSelect = ui.Select({
     renderAoi(aoiSelect.getValue());
 
     // Titles and subtitles
-    titleLabel.setValue(translate('Scam Compound Explorer V3'));
+    titleLabel.setValue(translate('Scam Compound Explorer'));
     subtitleLabel.setValue(translate('subtitle'));
     aoiFocusLabel.setValue(translate('Regional focus'));
     rankingMetricLabel.setValue(translate('Ranking metric'));
@@ -2013,7 +2013,7 @@ map.onClick(function(coords) {
 // ---------------------------------------------------------------------------
 function updateAllLabels() {
   // Title and subtitle
-  titleLabel.setValue(translate('Scam Compound Explorer V3'));
+  titleLabel.setValue(translate('Scam Compound Explorer'));
   subtitleLabel.setValue(translate('subtitle'));
 
   // Left panel labels
